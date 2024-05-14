@@ -41,6 +41,10 @@ class CausalSelfAttention(nn.Module):
         self.n_head = config.n_head
         self.n_embd = config.n_embd
         self.dropout = config.dropout
+
+        # set the window size from config
+        self.wind = config.wind
+
         # flash attention make GPU go brrrrr but support is only in PyTorch >= 2.0
         self.flash = hasattr(torch.nn.functional, 'scaled_dot_product_attention')
         if not self.flash:
@@ -48,6 +52,12 @@ class CausalSelfAttention(nn.Module):
             # causal mask to ensure that attention is only applied to the left in the input sequence
         self.register_buffer("bias", torch.tril(torch.ones(config.block_size, config.block_size))
             .view(1, 1, config.block_size, config.block_size))
+        print(" HELLO WORLD !!!!!!!!!!!!!!")
+        print("Wind: " + str(config.wind))
+        for i in range(self.wind + 1, config.block_size, 1):
+            for j in range(i - self.wind, -1, -1):
+                self.bias[i][j] = torch.zeros(config.batch_size, self.n_head)
+
 
     def forward(self, x):
         B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
@@ -61,6 +71,7 @@ class CausalSelfAttention(nn.Module):
         # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
         if self.flash:
             # efficient attention using Flash Attention CUDA kernels
+            #change the mask so that it isn't just the causal mask; implement it manually in self.bias
             y = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn_mask=self.bias, dropout_p=self.dropout if self.training else 0, is_causal=False)
         else:
             # manual implementation of attention
@@ -113,6 +124,7 @@ class GPTConfig:
     n_head: int = 12
     n_embd: int = 768
     dropout: float = 0.0
+    wind: int = 100 # window size for local attention
     bias: bool = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
 
 class GPT(nn.Module):
