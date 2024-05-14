@@ -56,7 +56,7 @@ class CausalSelfAttention(nn.Module):
         print("Wind: " + str(config.wind))
         for i in range(self.wind + 1, config.block_size, 1):
             for j in range(i - self.wind, -1, -1):
-                self.bias[i][j] = torch.zeros(config.batch_size, self.n_head)
+                self.bias[0][0][i][j] = torch.zeros(config.batch_size, self.n_head)
 
 
     def forward(self, x):
