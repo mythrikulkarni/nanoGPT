@@ -126,6 +126,7 @@ class GPTConfig:
     dropout: float = 0.0
     wind: int = 100 # window size for local attention
     bias: bool = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
+    batch_size: int = 64
 
 class GPT(nn.Module):
 
