@@ -46,6 +46,7 @@ class CausalSelfAttention(nn.Module):
         self.wind = config.wind
 
         n_key_query = config.n_key_query
+        print("new value: " + str(self.n_key_query))
 
         # flash attention make GPU go brrrrr but support is only in PyTorch >= 2.0
         self.flash = hasattr(torch.nn.functional, 'scaled_dot_product_attention')
