@@ -136,7 +136,7 @@ class GPTConfig:
     n_layer: int = 12
     n_head: int = 12
     n_embd: int = 768
-    n_key_query = 32
+    n_key_query: int = 32
     dropout: float = 0.0
     wind: int = 100 # window size for local attention
     bias: bool = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
