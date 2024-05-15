@@ -45,18 +45,24 @@ class CausalSelfAttention(nn.Module):
         # set the window size from config
         self.wind = config.wind
 
+        n_key_query = config.n_key_query
+
         # flash attention make GPU go brrrrr but support is only in PyTorch >= 2.0
         self.flash = hasattr(torch.nn.functional, 'scaled_dot_product_attention')
         if not self.flash:
             print("WARNING: using slow attention. Flash Attention requires PyTorch >= 2.0")
             # causal mask to ensure that attention is only applied to the left in the input sequence
-        self.register_buffer("bias", torch.tril(torch.ones(config.block_size, config.block_size))
-            .view(1, 1, config.block_size, config.block_size))
-        print(" HELLO WORLD !!!!!!!!!!!!!!")
-        print("Wind: " + str(config.wind))
-        for i in range(self.wind + 1, config.block_size, 1):
-            for j in range(i - self.wind, -1, -1):
-                self.bias[0][0][i][j] = torch.zeros(config.batch_size, self.n_head)
+
+
+        bias = torch.tril(torch.ones(config.block_size, config.block_size)).view(1, 1, config.block_size, config.block_size)
+        if self.wind >= 0:
+            self.flash = False #disable flash attention if there is wind
+            print(" HELLO WORLD !!!!!!!!!!!!!!")
+            print("Wind: " + str(config.wind))
+            for i in range(self.wind + 1, config.block_size, 1):
+                for j in range(i - self.wind, -1, -1):
+                    bias[0][0][i][j] = 0
+        self.register_buffer("bias", bias)
 
 
     def forward(self, x):
@@ -64,9 +70,12 @@ class CausalSelfAttention(nn.Module):
 
         # calculate query, key, values for all heads in batch and move head forward to be the batch dim
         q, k, v  = self.c_attn(x).split(self.n_embd, dim=2)
-        k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
-        q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
-        v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+        #k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+        #q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+        #v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+        k = k.view(B, T, self.n_head, self.n_key_query).transpose(1, 2) # (B, nh, T, hs)
+        q = q.view(B, T, self.n_head, self.n_key_query).transpose(1, 2) # (B, nh, T, hs)
+        v = v.view(B, T, self.n_head, self.n_key_query).transpose(1, 2) # (B, nh, T, hs)
 
         # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
         if self.flash:
@@ -91,13 +100,16 @@ class MLP(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.c_fc    = nn.Linear(config.n_embd, 4 * config.n_embd, bias=config.bias)
+        #self.c_fc2   = nn.Linear(config.n_embed, 4 * config.n_embd, bias=config.bias)
         self.gelu    = nn.GELU()
         self.c_proj  = nn.Linear(4 * config.n_embd, config.n_embd, bias=config.bias)
         self.dropout = nn.Dropout(config.dropout)
 
     def forward(self, x):
+        #i = x
         x = self.c_fc(x)
         x = self.gelu(x)
+        #x = x * self.c_fc2(i)
         x = self.c_proj(x)
         x = self.dropout(x)
         return x
@@ -123,6 +135,7 @@ class GPTConfig:
     n_layer: int = 12
     n_head: int = 12
     n_embd: int = 768
+    n_key_query = 32
     dropout: float = 0.0
     wind: int = 100 # window size for local attention
     bias: bool = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
