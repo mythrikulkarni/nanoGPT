@@ -26,8 +26,8 @@ dropout = 0.2
 #for problems 2-4, change these values:
 embdsize_kqv = 32 # for p2, only used if reduce_q_k is True
 wind = -1   #for problem 3
-reduce_q_k = True  # for problem 2
-change_mlp = False  # for problem 4
+reduce_q_k = False  # for problem 2
+change_mlp = True # for problem 4
 
 learning_rate = 1e-3 # with baby networks can afford to go a bit higher
 max_iters = 5000
