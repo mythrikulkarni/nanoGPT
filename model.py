@@ -41,22 +41,50 @@ class CausalSelfAttention(nn.Module):
         self.n_head = config.n_head
         self.n_embd = config.n_embd
         self.dropout = config.dropout
-        # flash attention make GPU go brrrrr but support is only in PyTorch >= 2.0
+
+        #for adding wind attention:
+        self.wind = config.wind
+
+        #for reducing dimenstionality of k and q:
+        self.embdsize_kqv = config.embdsize_kqv
+        self.reduce_k_q = config.reduce_q_k
+
+        #for problem 2: add k and q projections
+        self.k_proj = nn.Linear(config.n_embd, config.n_head * self.embdsize_kqv, bias=config.bias)
+        self.q_proj = nn.Linear(config.n_embd, config.n_head * self.embdsize_kqv, bias=config.bias)
+
         self.flash = hasattr(torch.nn.functional, 'scaled_dot_product_attention')
         if not self.flash:
             print("WARNING: using slow attention. Flash Attention requires PyTorch >= 2.0")
-            # causal mask to ensure that attention is only applied to the left in the input sequence
-            self.register_buffer("bias", torch.tril(torch.ones(config.block_size, config.block_size))
-                                        .view(1, 1, config.block_size, config.block_size))
+
+        #for problem 3: set bias for wind attention
+        bias = torch.tril(torch.ones(config.block_size, config.block_size)).view(1, 1, config.block_size, config.block_size)
+                
+        if self.wind >= 0: 
+            self.flash = False #don't use flash attention if using wind attention
+            for curr_token_pos in range(self.wind + 1, config.block_size, 1):
+                for reset_token_pos in range(curr_token_pos - self.wind, -1, -1):
+                    bias[0][0][curr_token_pos][reset_token_pos] = 0
+
+        self.register_buffer("bias", bias)
 
     def forward(self, x):
         B, T, C = x.size() # batch size, sequence length, embedding dimensionality (n_embd)
 
-        # calculate query, key, values for all heads in batch and move head forward to be the batch dim
-        q, k, v  = self.c_attn(x).split(self.n_embd, dim=2)
-        k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
-        q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
-        v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+        #Problem 2: if down project enabled for k and q, then use new MLP layer to find
+        #the new k and q projection matrices so that the new values are n_head * embdsize_kqv
+        if self.reduce_k_q:
+            k = self.k_proj(x).view(B, T, self.n_head, self.embdsize_kqv).transpose(1, 2)
+            q = self.q_proj(x).view(B, T, self.n_head, self.embdsize_kqv).transpose(1, 2)
+            _, _, v = self.c_attn(x).split(self.n_embd, dim=2)
+            v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+            #must also disable flash attention if reducing k and q; manually implement attention
+            self.flash = False
+        else: #same as before (code given for problem 1)
+            q, k, v  = self.c_attn(x).split(self.n_embd, dim=2)
+            k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+            q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
+            v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2) # (B, nh, T, hs)
 
         # causal self-attention; Self-attend: (B, nh, T, hs) x (B, nh, hs, T) -> (B, nh, T, T)
         if self.flash:
@@ -80,15 +108,26 @@ class MLP(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.c_fc    = nn.Linear(config.n_embd, 4 * config.n_embd, bias=config.bias)
+        self.c_fc2    = nn.Linear(config.n_embd, 4 * config.n_embd, bias=config.bias)
         self.gelu    = nn.GELU()
         self.c_proj  = nn.Linear(4 * config.n_embd, config.n_embd, bias=config.bias)
         self.dropout = nn.Dropout(config.dropout)
 
     def forward(self, x):
-        x = self.c_fc(x)
-        x = self.gelu(x)
-        x = self.c_proj(x)
-        x = self.dropout(x)
+        #for problem 4: if change_mlp is enabled, then use the new MLP layer
+        if self.change_mlp:
+            i = x
+            x = self.c_fc(x)
+            x = self.gelu(x)
+            x = x * self.c_fc2(i)
+            x = self.c_proj(x)
+            x = self.dropout(x)
+        else:
+            #Original MLP
+            x = self.c_fc(x)
+            x = self.gelu(x)
+            x = self.c_proj(x)
+            x = self.dropout(x)
         return x
 
 class Block(nn.Module):
@@ -114,6 +153,12 @@ class GPTConfig:
     n_embd: int = 768
     dropout: float = 0.0
     bias: bool = True # True: bias in Linears and LayerNorms, like GPT-2. False: a bit better and faster
+
+    #for problems 2-4; do not have to change these values, only the ones in the config file
+    embdsize_kqv: int = 32 # for p2, only used if reduce_q_k is True
+    wind: int = -1   #for problem 3
+    reduce_q_k: bool = False  # for problem 2
+    change_mlp: bool = False  # for problem 4
 
 class GPT(nn.Module):
 
