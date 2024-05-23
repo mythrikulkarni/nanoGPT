@@ -25,7 +25,7 @@ n_embd = 384
 dropout = 0.2
 #for problems 2-4, change these values:
 embdsize_kqv = 32 # for p2, only used if reduce_q_k is True
-wind = 10   #for problem 3
+wind = 100   #for problem 3
 reduce_q_k = False  # for problem 2
 change_mlp = False # for problem 4
 
